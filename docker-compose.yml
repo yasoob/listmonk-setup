@@ -1,0 +1,76 @@
+# NOTE: This docker-compose.yml is meant to be just an example guideline
+# on how you can achieve the same. It is not intented to run out of the box
+# and you must edit the below configurations to suit your needs.
+
+version: "3.7"
+
+x-app-defaults: &app-defaults
+  restart: unless-stopped
+  image: listmonk/listmonk:latest
+  ports:
+    - "9000:9000"
+  networks:
+    - listmonk
+
+x-db-defaults: &db-defaults
+    image: postgres:11
+    ports:
+      - "9432:5432"
+    networks:
+      - listmonk
+    environment:
+      - POSTGRES_PASSWORD=listmonk
+      - POSTGRES_USER=listmonk
+      - POSTGRES_DB=listmonk
+    restart: unless-stopped
+
+services:
+  db:
+    <<: *db-defaults
+    volumes:
+      - type: volume
+        source: listmonk-data
+        target: /var/lib/postgresql/data
+
+  app:
+    <<: *app-defaults
+    depends_on:
+      - db
+    command: "./listmonk --static-dir=/listmonk/static"
+    volumes:
+      - ./config.toml/:/listmonk/config.toml
+      - ./static:/listmonk/static
+  
+  nginx:
+    image: nginx:mainline-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./data/nginx:/etc/nginx/conf.d
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    networks:
+      - listmonk
+    depends_on:
+      - app
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    networks:
+      - listmonk
+    depends_on:
+      - nginx
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+networks:
+  listmonk:
+
+volumes:
+  listmonk-data:
